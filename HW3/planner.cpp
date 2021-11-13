@@ -23,7 +23,8 @@
 #include <utility>   
 #include <cstdint>
 #include <cstring>
-
+#include <cmath>
+#include <assert.h>
 
 #define SYMBOLS 0
 #define INITIAL 1
@@ -48,6 +49,7 @@ class GroundedCondition
 private:
     string predicate;
     list<string> arg_values;
+    
     bool truth = true;
 
 public:
@@ -84,6 +86,8 @@ public:
     {
         return this->truth;
     }
+
+
 
     friend ostream& operator<<(ostream& os, const GroundedCondition& pred)
     {
@@ -396,6 +400,9 @@ public:
     unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> get_goalConditions(){
         return this->goal_conditions;
     }
+    unordered_set<Action, ActionHasher, ActionComparator> get_actions(){
+        return this->actions;
+    }
 
     friend ostream& operator<<(ostream& os, const Env& w)
     {
@@ -425,6 +432,8 @@ class GroundedAction
 private:
     string name;
     list<string> arg_values;
+    unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> preconditions;
+    unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> effects;
 
 public:
     GroundedAction(string name, list<string> arg_values)
@@ -446,6 +455,23 @@ public:
         return this->arg_values;
     }
 
+    unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> get_preconditions() const
+    {
+        return this->preconditions;
+    }
+    unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> get_effects() const
+    {
+        return this->effects;
+    }
+    void set_preconditions(unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> preconditions_in){
+        this->preconditions = preconditions_in;
+    }
+
+    void set_effects(unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> effects_in){
+        this->effects = effects_in;
+    }
+
+
     bool operator==(const GroundedAction& rhs) const
     {
         if (this->name != rhs.name || this->arg_values.size() != rhs.arg_values.size())
@@ -466,7 +492,15 @@ public:
 
     friend ostream& operator<<(ostream& os, const GroundedAction& gac)
     {
-        os << gac.toString() << " ";
+        os << gac.toString() << endl;
+        os << "Precondition: ";
+        for (GroundedCondition precond : gac.get_preconditions())
+            os << precond;
+        os << endl;
+        os << "Effect: ";
+        for (GroundedCondition effect : gac.get_effects())
+            os << effect;
+        os << endl;
         return os;
     }
 
@@ -768,22 +802,35 @@ Env* create_env(char* filename)
 class State{
 public: 
     unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> conditions;
-    double g;
-    double h;
-    double f;
-    int idx;
-    State(unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> c, int index){
+    State* parent = nullptr;
+    double g = (double) DBL_MAX;
+    double h = (double) DBL_MAX;
+    double f = (double) DBL_MAX;
+    int visited = false;
+
+    State(unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> c){
         this->conditions = c;
-        this->g = (double) DBL_MAX;
-        this->h = (double) DBL_MAX;
-        this->f = this->g + this->h;
-        this->idx = index;
     }
 
-    void updatefValue(){
+    void setGval(double gVal){
+        this->g = gVal;
+    }
+
+    void setHval(double hVal){
+        this->h = hVal;
+    }
+
+    void updateFval(){
         this->f = this->g + this->h;
     }
 
+    bool is_exit_condition(GroundedCondition gc) const {
+        if ((this->conditions).find(gc) != (this->conditions).end()) {
+            return true;
+        }
+        return false;
+    }
+    
 };
 
 class Compare_State {
@@ -794,51 +841,182 @@ public:
 };
 
 
-class Astartplanner{
-public:
-    Env* env;
-    unordered_map<int, State*> stateMap;
+
     
-    priority_queue<State*, vector<State*>, Compare_State> openList;
-    unordered_set<int> closeSet;
-
-    list<GroundedAction> plan;
-
-    Astartplanner(Env* e){
-        this->env = e;
-        State* initState = new State(env->get_initConditions(), 0);
-        initState->g = 0.0;
-        initState->h = 0.0;
-        initState->f = 0.0;
-
-        stateMap.insert({0,initState});
-        openList.push(initState);
-
-        while(!openList.empty()){
-            State* currentState = openList.top();
-            openList.pop();
-            closeSet.insert(currentState->idx);
-
-
+    
+double calc_Heuristic(State* tempState, State* goalState){
+    double output = 0.0;
+    for (auto itr = goalState->conditions.begin(); itr != goalState->conditions.end(); itr++){
+        if (tempState->conditions.find(*itr) == tempState->conditions.end()){
+            output += 1.0;
         }
     }
-    
-    double calc_Heuristic(State* temp){
+    return output;
+}
+
+bool at_goal(State* tempState, State* goalState){
+    bool goal = true;
+    for (auto itr = goalState->conditions.begin(); itr != goalState->conditions.end(); itr++){
+        if (tempState->conditions.find(*itr) == tempState->conditions.end()){
+            goal = false;
+        }
+    }
+    return goal;
+} 
+        
+void arg_permutation(int cur, int numofArgs, vector<string> symbols, vector<string> level, vector<vector<string>> &perm, vector<bool>& visited){
+    if (cur == numofArgs){
+        perm.push_back(level);
+        return;
+    }
+    else{
+        for (int i = 0; i < symbols.size(); i++){
+            if (!visited[i]){
+                visited[i] = true;
+                level.push_back(symbols[i]);
+                arg_permutation(cur + 1, numofArgs, symbols, level, perm, visited);
+                visited[i] = false;
+                level.pop_back();
+            }
+        }
 
     }
-    
+}
+
+// generate all possible next actions
+
+list<GroundedAction> get_nextActions(Env* env){
+    list<GroundedAction> allActions;
+    vector<string> symbols;
+    for (auto symbol : env->get_symbols()){
+        symbols.push_back(symbol);
+    }
+    int numofSymbols = symbols.size();
+
+    GroundedCondition wrongEffect("Clear", {"Table"}, true);
+
+    // for all possible action, generate grounded actions
+    for (auto action : env->get_actions()){
+        
+        unordered_set<Condition, ConditionHasher, ConditionComparator> preconditions = action.get_preconditions();
+        unordered_set<Condition, ConditionHasher, ConditionComparator> effects = action.get_effects();
+
+        string actionName = action.get_name();
+        list<string> actionArgs = action.get_args();
+        int numofArgs = action.get_args().size();
+
+        // permutation of all symbols 
+        vector<vector<string>> argPerm;
+        vector<string> level;
+        vector<bool> visited(numofSymbols, false);
+        arg_permutation(0, numofArgs, symbols, level, argPerm, visited);                                 
+        
         
 
+        for (vector<string> tempArgs: argPerm){
+            unordered_map<string, string> argsMap;
+            auto action_iter = actionArgs.begin();
+            for (int i = 0; i < numofArgs; ++i) {
+                
+                argsMap[*action_iter] = tempArgs[i];
+                action_iter++;
+            }
 
-};
+            list<string> groundactionArgs(tempArgs.begin(), tempArgs.end());
+            GroundedAction groundAction(actionName, groundactionArgs);
+            
+            unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> gaPre;
+            unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> gaEff;
 
+            for (Condition precond: preconditions) {
+                list<string> precond_args = precond.get_args();
+                list<string> g_precond_args;
+                for (string &precond_arg: precond_args) {
+                    if (argsMap.find(precond_arg) != argsMap.end()) {
+                        g_precond_args.push_back(argsMap[precond_arg]);
+                    } else {
+                        g_precond_args.push_back(precond_arg);
+                    }
+                }
+                string predicate = precond.get_predicate();
+                bool g_truth = precond.get_truth();
+                GroundedCondition g_precond(predicate, g_precond_args, g_truth);
+                gaPre.insert(g_precond);
+            }
+
+            for (Condition effect: effects) {
+                list<string> effect_args = effect.get_args();
+                list<string> g_effect_args;
+                for (string &effect_arg: effect_args) {
+                    if (argsMap.find(effect_arg) != argsMap.end()) {
+                        g_effect_args.push_back(argsMap[effect_arg]);
+                    } else {
+                        g_effect_args.push_back(effect_arg);
+                    }
+
+                }
+                string predicate = effect.get_predicate();
+                bool g_truth = effect.get_truth();
+                GroundedCondition g_effect(predicate, g_effect_args, g_truth);
+                if (g_effect == wrongEffect) {
+                    continue;
+                }
+                gaEff.insert(g_effect);
+            }
+
+            groundAction.set_preconditions(gaPre);
+            groundAction.set_effects(gaEff);
+            allActions.push_back(groundAction);
+        }
+        
+
+    }
+    return allActions;
+}
+
+bool validGroundaction(State &tempState, GroundedAction &ga) {
+    const unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> &gaPre = ga.get_preconditions();
+    for (const GroundedCondition &tempGroundcondition: gaPre) {
+        if (!tempState.is_exit_condition(tempGroundcondition)) {
+            return false;
+        }
+    }
+    return true;
+}
 
 list<GroundedAction> planner(Env* env)
 {
     // this is where you insert your planner
-    Astartplanner planA(env);
+    list<GroundedAction>  all_action = get_nextActions(env);
+    cout << all_action.size();
+    // unordered_map<int, State*> stateMap;
+    
+    // priority_queue<State*, vector<State*>, Compare_State> openList;
+    // vector<State*> closeList;
+    
+    list<GroundedAction> actions;
+
+    // State* initState = new State(env->get_initConditions());
+    // State* goalState = new State(env->get_goalConditions());
+
+    // initState->setGval(0.0);
+    // double h_temp = calc_Heuristic(initState, goalState);
+    // initState->setHval(h_temp);
+    // initState->updateFval();
+
+    // cout<< "this is h " << h_temp << endl;
+
+    // openList.push(initState);
+
+    // while(!openList.empty()){
+    //     State* currentState = openList.top();
+    //     openList.pop();
+    //     closeList.push_back(currentState);
+
+
+    // }
+    
     // blocks world example
-    list<GroundedAction> actions = planA.plan;
     // actions.push_back(GroundedAction("MoveToTable", { "A", "B" }));
     // actions.push_back(GroundedAction("Move", { "C", "Table", "A" }));
     // actions.push_back(GroundedAction("Move", { "B", "Table", "C" }));
