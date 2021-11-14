@@ -87,7 +87,9 @@ public:
         return this->truth;
     }
 
-
+    void set_truth(bool input){
+        this->truth = input;
+    }
 
     friend ostream& operator<<(ostream& os, const GroundedCondition& pred)
     {
@@ -803,10 +805,16 @@ class State{
 public: 
     unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> conditions;
     State* parent = nullptr;
+    GroundedAction* action = nullptr;
+
     double g = (double) DBL_MAX;
     double h = (double) DBL_MAX;
     double f = (double) DBL_MAX;
     int visited = false;
+
+    State(){
+        this->conditions = {};
+    }
 
     State(unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> c){
         this->conditions = c;
@@ -830,7 +838,47 @@ public:
         }
         return false;
     }
-    
+
+    GroundedAction* get_GroundedAction(){
+        return this->action;
+    }
+    unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> get_conditions(){
+        return this->conditions;
+    }
+
+    void remove_condition(GroundedCondition gc) {
+        bool truth = true;
+        gc.set_truth(truth);
+        this->conditions.erase(gc);
+        int a = 0;
+    }
+
+    void add_condition(GroundedCondition gc) {
+        this->conditions.insert(gc);
+    }
+
+    bool operator==(const State &rhs) const {
+        bool result1 = true;
+        bool result2 = true;
+        for (GroundedCondition gc: rhs.conditions) {
+            if (!(this->is_exit_condition(gc))) {
+                result1 = false;
+                break;
+            }
+        }
+        for (GroundedCondition gc: this->conditions) {
+            if (!(rhs.is_exit_condition(gc))) {
+                result2 = false;
+                break;
+            }
+        }
+        return (result1 & result2);
+
+    }
+
+
+
+
 };
 
 class Compare_State {
@@ -974,7 +1022,7 @@ list<GroundedAction> get_nextActions(Env* env){
     return allActions;
 }
 
-bool validGroundaction(State &tempState, GroundedAction &ga) {
+bool validGroundAction(State &tempState, GroundedAction &ga) {
     const unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> &gaPre = ga.get_preconditions();
     for (const GroundedCondition &tempGroundcondition: gaPre) {
         if (!tempState.is_exit_condition(tempGroundcondition)) {
@@ -984,38 +1032,117 @@ bool validGroundaction(State &tempState, GroundedAction &ga) {
     return true;
 }
 
+void addActionEffect(State *&currentState, State *&nextState, GroundedAction &g_action) {
+//    const unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> &sonNodeCodition = sonNode.get_conditions();
+    const unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> &currentNodeCoditions =
+            currentState->get_conditions();
+    for (const GroundedCondition &gc: currentNodeCoditions) {
+        if (!gc.get_truth()) {
+            throw exception();
+        }
+        nextState->add_condition(gc);
+    }
+    for (const GroundedCondition &g_effect_cond: g_action.get_effects()) {
+        if (g_effect_cond.get_truth()) {
+            nextState->add_condition(g_effect_cond);
+        } else {
+            nextState->remove_condition(g_effect_cond);
+        }
+    }
+//    cout <<"out add son conditions" <<endl;
+}
+
+bool inClose(State* currentState, vector<State*> & closedSet) {
+    for (auto it = closedSet.begin(); it != closedSet.end(); it++) {
+        if ((**it) == (*currentState)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+
+
 list<GroundedAction> planner(Env* env)
 {
     // this is where you insert your planner
-    list<GroundedAction>  all_action = get_nextActions(env);
-    cout << all_action.size();
-    // unordered_map<int, State*> stateMap;
+    bool foundGoal = false;
+    list<GroundedAction>  allActions = get_nextActions(env);
+    vector<State*> stateMap;
     
-    // priority_queue<State*, vector<State*>, Compare_State> openList;
-    // vector<State*> closeList;
+    priority_queue<State*, vector<State*>, Compare_State> openList;
+    vector<State*> closeList;
     
     list<GroundedAction> actions;
 
-    // State* initState = new State(env->get_initConditions());
-    // State* goalState = new State(env->get_goalConditions());
+    State* initState = new State(env->get_initConditions());
+    State* goalState = new State(env->get_goalConditions());
 
-    // initState->setGval(0.0);
-    // double h_temp = calc_Heuristic(initState, goalState);
-    // initState->setHval(h_temp);
-    // initState->updateFval();
+    initState->setGval(0.0);
+    double h_temp = calc_Heuristic(initState, goalState);
+    initState->setHval(h_temp);
+    initState->updateFval();
 
-    // cout<< "this is h " << h_temp << endl;
+    openList.push(initState);
+    stateMap.push_back(initState);
 
-    // openList.push(initState);
+    while(!openList.empty()){
+        State* currentState = openList.top();
+        openList.pop();
+        if(at_goal(currentState, goalState)){
+            cout << "GOAL FOUND" << endl;
+            goalState = currentState;
+            foundGoal = true;
+            break;
+        }
+        closeList.push_back(currentState);
+        for (GroundedAction& g_action: allActions) {
+            if (validGroundAction(*currentState, g_action)) {
+                State *nextState = new State();
+                nextState->action = &g_action;
+                nextState->parent = currentState;
+                addActionEffect(currentState, nextState, g_action);
 
-    // while(!openList.empty()){
-    //     State* currentState = openList.top();
-    //     openList.pop();
-    //     closeList.push_back(currentState);
+                if (inClose(nextState, closeList)) {
+ 
+                    continue;
+                }
 
+                for (auto it = stateMap.begin(); it != stateMap.end(); it++) {
+                    if ((**it) == (*nextState)) {
+                        nextState = *it;
+                        if (nextState->g > currentState->g + 1) {
+                            nextState->g = currentState->g + 1;
+                            nextState->parent = currentState;
+                            nextState->action = &g_action;
+                        }
+                        goto skip;
+                    }
+                }
+                nextState->g = currentState->g + 1;
+                nextState->h = calc_Heuristic(nextState, goalState);
+                openList.push(nextState);
+                stateMap.push_back(nextState);
+                skip:
+                nextState->updateFval();
+            }
+        }
 
-    // }
+    }
     
+    if (foundGoal){
+        State *traceState = goalState;
+        while (traceState->parent != nullptr) {
+            GroundedAction* actionPtr = traceState->action;
+            if (actionPtr == nullptr){
+                cout << "TF??" << endl;
+            }
+            actions.push_front(*(traceState->action));
+            traceState = traceState->parent;
+        }
+    }else{
+        cout << "GOAL NOT FOUND" << endl;
+    }
     // blocks world example
     // actions.push_back(GroundedAction("MoveToTable", { "A", "B" }));
     // actions.push_back(GroundedAction("Move", { "C", "Table", "A" }));

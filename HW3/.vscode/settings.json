@@ -6,6 +6,14 @@
         "cmath": "cpp",
         "iosfwd": "cpp",
         "ostream": "cpp",
-        "map": "cpp"
+        "map": "cpp",
+        "array": "cpp",
+        "list": "cpp",
+        "unordered_map": "cpp",
+        "unordered_set": "cpp",
+        "string_view": "cpp",
+        "initializer_list": "cpp",
+        "regex": "cpp",
+        "*.tcc": "cpp"
     }
 }
