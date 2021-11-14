@@ -847,10 +847,9 @@ public:
     }
 
     void remove_condition(GroundedCondition gc) {
-        bool truth = true;
-        gc.set_truth(truth);
+        // gc.set_truth(true);
         this->conditions.erase(gc);
-        int a = 0;
+        // int a = 0;
     }
 
     void add_condition(GroundedCondition gc) {
@@ -987,8 +986,7 @@ list<GroundedAction> get_nextActions(Env* env){
                     }
                 }
                 string predicate = precond.get_predicate();
-                bool g_truth = precond.get_truth();
-                GroundedCondition g_precond(predicate, g_precond_args, g_truth);
+                GroundedCondition g_precond(predicate, g_precond_args, true);
                 gaPre.insert(g_precond);
             }
 
@@ -1005,10 +1003,14 @@ list<GroundedAction> get_nextActions(Env* env){
                 }
                 string predicate = effect.get_predicate();
                 bool g_truth = effect.get_truth();
-                GroundedCondition g_effect(predicate, g_effect_args, g_truth);
+                GroundedCondition g_effect(predicate, g_effect_args, true);
+                g_effect.set_truth(g_truth);
                 if (g_effect == wrongEffect) {
                     continue;
                 }
+                // if (g_truth){
+                //     gaEff.insert(g_effect);
+                // }
                 gaEff.insert(g_effect);
             }
 
@@ -1068,6 +1070,15 @@ list<GroundedAction> planner(Env* env)
     // this is where you insert your planner
     bool foundGoal = false;
     list<GroundedAction>  allActions = get_nextActions(env);
+    for (auto it : allActions){
+        unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> eff = it.get_effects();
+        cout << it.toString() << endl;
+        for (auto itt: eff){
+            cout << itt.toString() << endl;
+        }
+        cout <<  " " << endl;
+        
+    }
     vector<State*> stateMap;
     
     priority_queue<State*, vector<State*>, Compare_State> openList;
@@ -1096,15 +1107,14 @@ list<GroundedAction> planner(Env* env)
             break;
         }
         closeList.push_back(currentState);
-        for (GroundedAction& g_action: allActions) {
-            if (validGroundAction(*currentState, g_action)) {
+        for (GroundedAction& nextAction: allActions) {
+            if (validGroundAction(*currentState, nextAction)) {
                 State *nextState = new State();
-                nextState->action = &g_action;
+                nextState->action = &nextAction;
                 nextState->parent = currentState;
-                addActionEffect(currentState, nextState, g_action);
+                addActionEffect(currentState, nextState, nextAction);
 
                 if (inClose(nextState, closeList)) {
- 
                     continue;
                 }
 
@@ -1114,17 +1124,18 @@ list<GroundedAction> planner(Env* env)
                         if (nextState->g > currentState->g + 1) {
                             nextState->g = currentState->g + 1;
                             nextState->parent = currentState;
-                            nextState->action = &g_action;
+                            nextState->action = &nextAction;
                         }
-                        goto skip;
+                        nextState->updateFval();
+                        continue;
                     }
                 }
                 nextState->g = currentState->g + 1;
                 nextState->h = calc_Heuristic(nextState, goalState);
+                nextState->updateFval();
                 openList.push(nextState);
                 stateMap.push_back(nextState);
-                skip:
-                nextState->updateFval();
+                
             }
         }
 
