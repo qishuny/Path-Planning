@@ -810,7 +810,7 @@ public:
     double g = (double) DBL_MAX;
     double h = (double) DBL_MAX;
     double f = (double) DBL_MAX;
-    int visited = false;
+
 
     State(){
         this->conditions = {};
@@ -832,7 +832,7 @@ public:
         this->f = this->g + this->h;
     }
 
-    bool is_exit_condition(GroundedCondition gc) const {
+    bool correctCondition(GroundedCondition gc) const {
         if ((this->conditions).find(gc) != (this->conditions).end()) {
             return true;
         }
@@ -847,9 +847,8 @@ public:
     }
 
     void remove_condition(GroundedCondition gc) {
-        // gc.set_truth(true);
+        gc.set_truth(true);
         this->conditions.erase(gc);
-        // int a = 0;
     }
 
     void add_condition(GroundedCondition gc) {
@@ -860,24 +859,19 @@ public:
         bool result1 = true;
         bool result2 = true;
         for (GroundedCondition gc: rhs.conditions) {
-            if (!(this->is_exit_condition(gc))) {
+            if (!(this->correctCondition(gc))) {
                 result1 = false;
                 break;
             }
         }
         for (GroundedCondition gc: this->conditions) {
-            if (!(rhs.is_exit_condition(gc))) {
+            if (!(rhs.correctCondition(gc))) {
                 result2 = false;
                 break;
             }
         }
         return (result1 & result2);
-
     }
-
-
-
-
 };
 
 class Compare_State {
@@ -886,9 +880,6 @@ public:
         return(a->f > b->f);
     }
 };
-
-
-
     
     
 double calc_Heuristic(State* tempState, State* goalState){
@@ -932,7 +923,7 @@ void arg_permutation(int cur, int numofArgs, vector<string> symbols, vector<stri
 
 // generate all possible next actions
 
-list<GroundedAction> get_nextActions(Env* env){
+list<GroundedAction> getAllActions(Env* env){
     list<GroundedAction> allActions;
     vector<string> symbols;
     for (auto symbol : env->get_symbols()){
@@ -1018,44 +1009,37 @@ list<GroundedAction> get_nextActions(Env* env){
             groundAction.set_effects(gaEff);
             allActions.push_back(groundAction);
         }
-        
-
     }
     return allActions;
 }
 
+
 bool validGroundAction(State &tempState, GroundedAction &ga) {
     const unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> &gaPre = ga.get_preconditions();
     for (const GroundedCondition &tempGroundcondition: gaPre) {
-        if (!tempState.is_exit_condition(tempGroundcondition)) {
+        if (!tempState.correctCondition(tempGroundcondition)) {
             return false;
         }
     }
     return true;
 }
 
-void addActionEffect(State *&currentState, State *&nextState, GroundedAction &g_action) {
-//    const unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> &sonNodeCodition = sonNode.get_conditions();
-    const unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> &currentNodeCoditions =
-            currentState->get_conditions();
-    for (const GroundedCondition &gc: currentNodeCoditions) {
-        if (!gc.get_truth()) {
-            throw exception();
-        }
+void actionEffect(State *&currentState, State *&nextState, GroundedAction &g_action) {
+    unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> currentNodeCoditions = currentState->get_conditions();
+    for (GroundedCondition gc: currentNodeCoditions) {
         nextState->add_condition(gc);
     }
-    for (const GroundedCondition &g_effect_cond: g_action.get_effects()) {
+    for (GroundedCondition g_effect_cond: g_action.get_effects()) {
         if (g_effect_cond.get_truth()) {
             nextState->add_condition(g_effect_cond);
         } else {
             nextState->remove_condition(g_effect_cond);
         }
     }
-//    cout <<"out add son conditions" <<endl;
 }
 
-bool inClose(State* currentState, vector<State*> & closedSet) {
-    for (auto it = closedSet.begin(); it != closedSet.end(); it++) {
+bool checkCloseList(State* currentState, vector<State*> & closeList) {
+    for (auto it = closeList.begin(); it != closeList.end(); it++) {
         if ((**it) == (*currentState)) {
             return true;
         }
@@ -1068,17 +1052,22 @@ bool inClose(State* currentState, vector<State*> & closedSet) {
 list<GroundedAction> planner(Env* env)
 {
     // this is where you insert your planner
+    clock_t start, end1, end;
+    start = clock();
+
     bool foundGoal = false;
-    list<GroundedAction>  allActions = get_nextActions(env);
-    for (auto it : allActions){
-        unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> eff = it.get_effects();
-        cout << it.toString() << endl;
-        for (auto itt: eff){
-            cout << itt.toString() << endl;
-        }
-        cout <<  " " << endl;
-        
-    }
+    list<GroundedAction>  allActions = getAllActions(env);
+    end1 = clock();
+    float time_cost1 = (float) (end1 - start) / CLOCKS_PER_SEC;
+    cout << "EXPLORE ALL ACTIONS DONE IN: " << time_cost1 << " s " << endl;
+    // for (auto it : allActions){
+    //     unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> eff = it.get_effects();
+    //     cout << it.toString() << endl;
+    //     for (auto itt: eff){
+    //         cout << itt.toString() << endl;
+    //     }
+    //     cout <<  " " << endl;
+    // }
     vector<State*> stateMap;
     
     priority_queue<State*, vector<State*>, Compare_State> openList;
@@ -1112,29 +1101,32 @@ list<GroundedAction> planner(Env* env)
                 State *nextState = new State();
                 nextState->action = &nextAction;
                 nextState->parent = currentState;
-                addActionEffect(currentState, nextState, nextAction);
+                actionEffect(currentState, nextState, nextAction);
 
-                if (inClose(nextState, closeList)) {
+                if (checkCloseList(nextState, closeList)) {
                     continue;
                 }
 
                 for (auto it = stateMap.begin(); it != stateMap.end(); it++) {
-                    if ((**it) == (*nextState)) {
+                    if (**it == *nextState) {
                         nextState = *it;
                         if (nextState->g > currentState->g + 1) {
                             nextState->g = currentState->g + 1;
                             nextState->parent = currentState;
                             nextState->action = &nextAction;
+                             
                         }
-                        nextState->updateFval();
-                        continue;
+                        goto skip;
+                        
                     }
                 }
                 nextState->g = currentState->g + 1;
                 nextState->h = calc_Heuristic(nextState, goalState);
-                nextState->updateFval();
+
                 openList.push(nextState);
                 stateMap.push_back(nextState);
+                skip:
+                nextState->updateFval(); 
                 
             }
         }
@@ -1142,6 +1134,8 @@ list<GroundedAction> planner(Env* env)
     }
     
     if (foundGoal){
+        int totalStatesize = closeList.size() + stateMap.size();
+        cout << "TOTAL STATES EXPANDED: " << totalStatesize << endl;
         State *traceState = goalState;
         while (traceState->parent != nullptr) {
             GroundedAction* actionPtr = traceState->action;
@@ -1154,6 +1148,12 @@ list<GroundedAction> planner(Env* env)
     }else{
         cout << "GOAL NOT FOUND" << endl;
     }
+
+    end = clock();
+    float time_cost = (float) (end - start) / CLOCKS_PER_SEC;
+    cout << "PLANNING DONE IN: " << time_cost << " s " << endl;
+
+
     // blocks world example
     // actions.push_back(GroundedAction("MoveToTable", { "A", "B" }));
     // actions.push_back(GroundedAction("Move", { "C", "Table", "A" }));
