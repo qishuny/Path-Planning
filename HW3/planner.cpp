@@ -1079,7 +1079,8 @@ list<GroundedAction> planner(Env* env)
     State* goalState = new State(env->get_goalConditions());
 
     initState->setGval(0.0);
-    double h_temp = calc_Heuristic(initState, goalState);
+    // double h_temp = calc_Heuristic(initState, goalState);
+    double h_temp = 0;
     initState->setHval(h_temp);
     initState->updateFval();
 
@@ -1121,8 +1122,9 @@ list<GroundedAction> planner(Env* env)
                     }
                 }
                 nextState->g = currentState->g + 1;
-                nextState->h = calc_Heuristic(nextState, goalState);
-
+                // nextState->h = calc_Heuristic(nextState, goalState);
+                nextState->h = 0;
+                
                 openList.push(nextState);
                 stateMap.push_back(nextState);
                 skip:
